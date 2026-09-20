@@ -52,16 +52,24 @@ export function serveStatic(app: Express) {
     process.env.NODE_ENV === "development"
       ? path.resolve(import.meta.dirname, "../..", "dist", "public")
       : path.resolve(import.meta.dirname, "public");
-  if (!fs.existsSync(distPath)) {
-    console.error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`
-    );
+
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+
+    // fall through to index.html if the file doesn't exist
+    app.use("*", (_req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
+  } else {
+    console.log(`[API Mode] Serving without static frontend bundle (${distPath} not found).`);
+    app.get("/", (_req, res) => {
+      res.status(200).json({
+        status: "ok",
+        service: "BlastRadius API",
+        version: "1.0.0",
+        message: "BlastRadius Backend is active. Connect via tRPC at /api/trpc",
+      });
+    });
   }
-
-  app.use(express.static(distPath));
-
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
-  });
 }
+
