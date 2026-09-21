@@ -45,6 +45,40 @@ interface NodePos {
   y: number;
 }
 
+interface NodeKindMeta {
+  tag: string;
+  category: string;
+  accentColor: string;
+  bgLight: string;
+  tagWidth: number;
+}
+
+function getNodeKindMeta(node: FunctionNode): NodeKindMeta {
+  const file = node.file.toLowerCase();
+  const name = node.name.toLowerCase();
+  const kind = (node.kind || "").toLowerCase();
+
+  if (kind === "route" || file.includes("routes/") || file.includes("api/") || file.includes("controller")) {
+    return { tag: "ROUTE", category: "API Route", accentColor: "#38bdf8", bgLight: "rgba(56, 189, 248, 0.16)", tagWidth: 44 };
+  }
+  if (file.includes("db/") || file.includes("model") || file.includes("repository") || file.includes("queries")) {
+    return { tag: "DB OP", category: "Database Operation", accentColor: "#34d399", bgLight: "rgba(52, 211, 153, 0.16)", tagWidth: 42 };
+  }
+  if (name.includes("risk") || name.includes("auth") || name.includes("token") || name.includes("perm") || file.includes("risk") || file.includes("auth")) {
+    return { tag: "SECURITY", category: "Auth & Risk Control", accentColor: "#fbbf24", bgLight: "rgba(251, 191, 36, 0.16)", tagWidth: 54 };
+  }
+  if (kind === "job" || file.includes("jobs/") || file.includes("worker") || file.includes("cron")) {
+    return { tag: "WORKER", category: "Background Task", accentColor: "#fb7185", bgLight: "rgba(251, 113, 133, 0.16)", tagWidth: 52 };
+  }
+  if (kind === "handler" || file.includes("ui/") || file.includes("components/")) {
+    return { tag: "HANDLER", category: "UI Event Handler", accentColor: "#818cf8", bgLight: "rgba(129, 140, 248, 0.16)", tagWidth: 52 };
+  }
+  if (file.includes("services/") || file.includes("service")) {
+    return { tag: "SERVICE", category: "Domain Service", accentColor: "#c084fc", bgLight: "rgba(192, 132, 252, 0.16)", tagWidth: 50 };
+  }
+  return { tag: "UTIL", category: "Utility Function", accentColor: "#94a3b8", bgLight: "rgba(148, 163, 184, 0.16)", tagWidth: 36 };
+}
+
 interface GraphCanvasProps {
   graph: ProjectGraph;
   selectedId: string | null;
@@ -64,10 +98,12 @@ function GraphCanvas({
   onToggleViewMode,
   selectedNodeName,
 }: GraphCanvasProps) {
-  const width = 1000;
-  const height = 580;
+  const width = 1180;
+  const height = 620;
   const centerX = width / 2;
   const centerY = height / 2;
+  const CARD_W = 186;
+  const CARD_H = 58;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -75,6 +111,7 @@ function GraphCanvas({
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [spotlight, setSpotlight] = useState("");
 
   // Manual draggable positions
   const [customPositions, setCustomPositions] = useState<Map<string, NodePos>>(new Map());
@@ -126,47 +163,43 @@ function GraphCanvas({
 
     if (viewMode === "blast" && selectedId) {
       // 1. Center the selected node
-      pos.set(selectedId, { x: centerX, y: centerY });
+      pos.set(selectedId, { x: centerX, y: centerY - 15 });
 
-      // 2. Direct callers on the left (x = 270)
+      // 2. Direct callers on the left (x = centerX - 260)
       const callersArr = Array.from(directCallers);
       callersArr.forEach((id, idx) => {
         const total = callersArr.length;
-        const spread = (idx - (total - 1) / 2) * Math.min(65, 380 / Math.max(1, total));
-        pos.set(id, { x: centerX - 230, y: centerY + spread });
+        const spread = (idx - (total - 1) / 2) * Math.min(74, 460 / Math.max(1, total));
+        pos.set(id, { x: centerX - 260, y: centerY - 15 + spread });
       });
 
-      // 3. Direct callees on the right (x = 730)
+      // 3. Direct callees on the right (x = centerX + 260)
       const calleesArr = Array.from(directCallees);
       calleesArr.forEach((id, idx) => {
         const total = calleesArr.length;
-        const spread = (idx - (total - 1) / 2) * Math.min(65, 380 / Math.max(1, total));
-        pos.set(id, { x: centerX + 230, y: centerY + spread });
+        const spread = (idx - (total - 1) / 2) * Math.min(74, 460 / Math.max(1, total));
+        pos.set(id, { x: centerX + 260, y: centerY - 15 + spread });
       });
 
-      // 4. Transitive affected nodes further left (x = 90)
+      // 4. Transitive affected nodes further left (x = centerX - 470)
       const transArr = Array.from(transitiveAffected);
       transArr.forEach((id, idx) => {
         const total = transArr.length;
-        const spread = (idx - (total - 1) / 2) * Math.min(55, 380 / Math.max(1, total));
-        pos.set(id, { x: centerX - 410, y: centerY + spread });
+        const spread = (idx - (total - 1) / 2) * Math.min(72, 460 / Math.max(1, total));
+        pos.set(id, { x: centerX - 470, y: centerY - 15 + spread });
       });
 
-      // 5. Unrelated nodes arranged along outer perimeter so they remain accessible but quiet
+      // 5. Unrelated nodes arranged neatly along the bottom tray so the blast flow remains clean
       const placed = new Set([selectedId, ...callersArr, ...calleesArr, ...transArr]);
       const unrelated = allNodes.filter((n) => !placed.has(n.id));
       unrelated.forEach((node, idx) => {
         const total = unrelated.length;
-        const angle = (idx / Math.max(1, total)) * 2 * Math.PI - Math.PI / 2;
-        const rx = 440;
-        const ry = 245;
-        pos.set(node.id, {
-          x: centerX + Math.cos(angle) * rx,
-          y: centerY + Math.sin(angle) * ry,
-        });
+        const xStep = (width - 240) / Math.max(1, total - 1);
+        const xPos = total === 1 ? centerX : 120 + idx * xStep;
+        pos.set(node.id, { x: xPos, y: height - 32 });
       });
     } else {
-      // Full graph mode: Layered architecture based on in/out degrees
+      // Full graph mode: 4 clean architectural tiers based on in/out degrees & roles
       const inDeg = new Map<string, number>();
       const outDeg = new Map<string, number>();
       allNodes.forEach((n) => {
@@ -178,81 +211,88 @@ function GraphCanvas({
         inDeg.set(l.to, (inDeg.get(l.to) || 0) + 1);
       });
 
-      // Classify into layers
-      const layer0: string[] = []; // Root callers
-      const layer1: string[] = []; // Intermediate
-      const layer2: string[] = []; // Intermediate
-      const layer3: string[] = []; // Leaf callees
-      const isolated: string[] = []; // Disconnected utilities
+      const tier0: string[] = []; // Routes & Handlers & Root callers
+      const tier1: string[] = []; // Core Services
+      const tier2: string[] = []; // Domain Modules
+      const tier3: string[] = []; // Leaf callees & Utilities
 
       allNodes.forEach((n) => {
         const i = inDeg.get(n.id) || 0;
         const o = outDeg.get(n.id) || 0;
-        if (i === 0 && o === 0) {
-          isolated.push(n.id);
-        } else if (i === 0) {
-          layer0.push(n.id);
-        } else if (o === 0) {
-          layer3.push(n.id);
+        const kind = (n.kind || "").toLowerCase();
+        const file = n.file.toLowerCase();
+
+        if (kind === "route" || kind === "handler" || file.includes("routes/") || (i === 0 && o > 0)) {
+          tier0.push(n.id);
+        } else if (kind === "job" || (o === 0 && i > 0) || file.includes("db/") || kind === "utility") {
+          tier3.push(n.id);
         } else if (o > i) {
-          layer1.push(n.id);
+          tier1.push(n.id);
         } else {
-          layer2.push(n.id);
+          tier2.push(n.id);
         }
       });
 
       const assignColumn = (nodes: string[], xCol: number) => {
         const total = nodes.length;
         nodes.forEach((id, idx) => {
-          const spread = (idx - (total - 1) / 2) * Math.min(58, 420 / Math.max(1, total));
-          // Offset slightly if column is large to prevent crowding
-          const xOffset = total > 7 ? (idx % 2 === 0 ? -22 : 22) : 0;
-          pos.set(id, { x: xCol + xOffset, y: centerY + spread });
+          const spread = (idx - (total - 1) / 2) * Math.min(74, 500 / Math.max(1, total));
+          pos.set(id, { x: xCol, y: centerY + spread });
         });
       };
 
-      assignColumn(layer0, 140);
-      assignColumn(layer1, 380);
-      assignColumn(layer2, 620);
-      assignColumn(layer3, 860);
-
-      // Place isolated nodes along the bottom row
-      isolated.forEach((id, idx) => {
-        const total = isolated.length;
-        const xPos = 140 + (idx / Math.max(1, total - 1)) * 720;
-        pos.set(id, { x: xPos, y: height - 42 });
-      });
+      assignColumn(tier0, 155);
+      assignColumn(tier1, 445);
+      assignColumn(tier2, 735);
+      assignColumn(tier3, 1025);
     }
 
     return pos;
-  }, [centerX, centerY, directCallees, directCallers, graph.links, graph.nodes, height, selectedId, transitiveAffected, viewMode]);
+  }, [centerX, centerY, directCallees, directCallers, graph.links, graph.nodes, height, selectedId, transitiveAffected, viewMode, width]);
 
   // Helper to get active position (custom or default)
   const getNodePos = useCallback((id: string): NodePos => {
     return customPositions.get(id) || defaultPositions.get(id) || { x: centerX, y: centerY };
   }, [centerX, centerY, customPositions, defaultPositions]);
 
-  // Window mouse event listeners for smooth dragging and panning
+  // Window mouse event listeners for smooth dragging and panning with rAF throttling
   useEffect(() => {
+    let rafId: number | null = null;
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (dragRef.current) {
-        const dx = (e.clientX - dragRef.current.startMouseX) / zoom;
-        const dy = (e.clientY - dragRef.current.startMouseY) / zoom;
-        if (Math.hypot(dx, dy) > 3) {
-          dragRef.current.hasMoved = true;
+      if (!dragRef.current && !isPanning) return;
+      if (rafId !== null) return;
+
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (dragRef.current) {
+          const dx = (e.clientX - dragRef.current.startMouseX) / zoom;
+          const dy = (e.clientY - dragRef.current.startMouseY) / zoom;
+          if (Math.hypot(dx, dy) > 4) {
+            dragRef.current.hasMoved = true;
+          }
+          const newX = dragRef.current.startNodeX + dx;
+          const newY = dragRef.current.startNodeY + dy;
+          const targetId = dragRef.current.nodeId;
+          setCustomPositions((prev) => {
+            const next = new Map(prev);
+            next.set(targetId, { x: newX, y: newY });
+            return next;
+          });
+        } else if (isPanning) {
+          setPan({
+            x: e.clientX - panStartRef.current.x,
+            y: e.clientY - panStartRef.current.y,
+          });
         }
-        const newX = dragRef.current.startNodeX + dx;
-        const newY = dragRef.current.startNodeY + dy;
-        setCustomPositions((prev) => new Map(prev).set(dragRef.current!.nodeId, { x: newX, y: newY }));
-      } else if (isPanning) {
-        setPan({
-          x: e.clientX - panStartRef.current.x,
-          y: e.clientY - panStartRef.current.y,
-        });
-      }
+      });
     };
 
     const handleMouseUp = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (dragRef.current) {
         if (!dragRef.current.hasMoved) {
           onSelect(dragRef.current.nodeId);
@@ -266,6 +306,7 @@ function GraphCanvas({
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -301,7 +342,7 @@ function GraphCanvas({
     setZoom((z) => Math.min(2.5, Math.max(0.4, Number((z + delta).toFixed(2)))));
   };
 
-  // Minimal toolbar controls
+  // Toolbar controls
   const handleZoomIn = () => setZoom((z) => Math.min(2.5, Number((z + 0.15).toFixed(2))));
   const handleZoomOut = () => setZoom((z) => Math.max(0.4, Number((z - 0.15).toFixed(2))));
   const handleFit = () => {
@@ -312,7 +353,13 @@ function GraphCanvas({
     setCustomPositions(new Map());
     setPan({ x: 0, y: 0 });
     setZoom(1);
+    setSpotlight("");
   };
+
+  const hoveredNode = useMemo(() => {
+    if (!hoveredNodeId) return null;
+    return graph.nodes.find((n) => n.id === hoveredNodeId) ?? null;
+  }, [graph.nodes, hoveredNodeId]);
 
   return (
     <>
@@ -322,10 +369,29 @@ function GraphCanvas({
           <h2>
             {viewMode === "blast" && selectedNodeName
               ? `Blast radius: ${selectedNodeName}`
-              : "Full repository graph"}
+              : "Full repository architecture"}
           </h2>
         </div>
         <div className="graph-toolbar-actions">
+          <div className="graph-spotlight-wrap" title="Highlight nodes matching name or file">
+            <Search size={12} />
+            <input
+              value={spotlight}
+              onChange={(e) => setSpotlight(e.target.value)}
+              placeholder="Highlight nodes…"
+              aria-label="Highlight nodes"
+            />
+            {spotlight && (
+              <button
+                onClick={() => setSpotlight("")}
+                style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", padding: 0 }}
+                title="Clear filter"
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+
           <div className="view-toggle">
             <button
               className={viewMode === "blast" ? "active" : ""}
@@ -340,6 +406,7 @@ function GraphCanvas({
               <Network size={13} /> full graph
             </button>
           </div>
+
           <div className="graph-controls-group">
             <button className="graph-control-btn" title="Zoom out" onClick={handleZoomOut} aria-label="Zoom out">
               <Minus size={13} />
@@ -367,23 +434,127 @@ function GraphCanvas({
         aria-label="Interactive function call graph"
       >
         <div className="graph-grid" />
-        <div className="graph-rings" />
 
         <svg className="graph-svg" viewBox={`0 0 ${width} ${height}`} role="img">
           <defs>
-            <marker id="arrowhead" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-              <path d="M0,1 L6,3.5 L0,6 z" fill="#4e6580" />
+            <marker id="arrow-default" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#3b526d" />
             </marker>
-            <marker id="arrowhead-active" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-              <path d="M0,1 L6,3.5 L0,6 z" fill="#ffb449" />
+            <marker id="arrow-amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#ffb449" />
             </marker>
-            <marker id="arrowhead-cyan" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-              <path d="M0,1 L6,3.5 L0,6 z" fill="#75d8ff" />
+            <marker id="arrow-cyan" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#38bdf8" />
+            </marker>
+            <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#34d399" />
+            </marker>
+            <marker id="arrow-danger" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#fb7185" />
+            </marker>
+            <marker id="arrow-quiet" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M 1 1 L 7 4 L 1 7 Z" fill="#1b2a3d" />
             </marker>
           </defs>
 
           <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-            {/* 1. Dependency Edges with exact perimeter offsets */}
+            {/* Architectural Swimlanes / Stage Guides in Background */}
+            {viewMode === "blast" && selectedId && (
+              <g className="swimlanes">
+                {/* Upstream Callers Lane */}
+                <rect
+                  x={20}
+                  y={22}
+                  width={430}
+                  height={height - 90}
+                  rx="12"
+                  fill="rgba(56, 189, 248, 0.02)"
+                  stroke="rgba(56, 189, 248, 0.12)"
+                  strokeDasharray="5 5"
+                  className="swimlane-rect"
+                />
+                <text x={35} y={44} fill="#38bdf8" fontSize="10" fontWeight="700" letterSpacing="0.1em" className="swimlane-title">
+                  UPSTREAM BLAST RADIUS (AFFECTED CALLERS)
+                </text>
+                <text x={35} y={58} fill="#546b86" fontSize="8.5" className="swimlane-desc">
+                  Functions broken if signature or return type changes
+                </text>
+
+                {/* Center Target Lane */}
+                <rect
+                  x={490}
+                  y={22}
+                  width={200}
+                  height={height - 90}
+                  rx="12"
+                  fill="rgba(255, 180, 73, 0.03)"
+                  stroke="rgba(255, 180, 73, 0.22)"
+                  strokeDasharray="5 5"
+                  className="swimlane-rect"
+                />
+                <text x={590} y={44} textAnchor="middle" fill="var(--amber)" fontSize="10" fontWeight="700" letterSpacing="0.1em" className="swimlane-title">
+                  ORIGIN / TARGET
+                </text>
+                <text x={590} y={58} textAnchor="middle" fill="#717f91" fontSize="8.5" className="swimlane-desc">
+                  Refactor candidate
+                </text>
+
+                {/* Downstream Callees Lane */}
+                <rect
+                  x={730}
+                  y={22}
+                  width={430}
+                  height={height - 90}
+                  rx="12"
+                  fill="rgba(52, 211, 153, 0.02)"
+                  stroke="rgba(52, 211, 153, 0.12)"
+                  strokeDasharray="5 5"
+                  className="swimlane-rect"
+                />
+                <text x={745} y={44} fill="#34d399" fontSize="10" fontWeight="700" letterSpacing="0.1em" className="swimlane-title">
+                  DOWNSTREAM CALLEES (DEPENDENCIES)
+                </text>
+                <text x={745} y={58} fill="#546b86" fontSize="8.5" className="swimlane-desc">
+                  Internal subroutines called by the target
+                </text>
+
+                {/* Unrelated Nodes Bottom Tray */}
+                <rect
+                  x={20}
+                  y={height - 56}
+                  width={width - 40}
+                  height={48}
+                  rx="8"
+                  fill="rgba(255, 255, 255, 0.015)"
+                  stroke="rgba(255, 255, 255, 0.05)"
+                />
+                <text x={35} y={height - 28} fill="#475569" fontSize="8.5" fontWeight="600" letterSpacing="0.06em">
+                  OTHER REPOSITORY FUNCTIONS (CLICK ANY CARD TO FOCUS)
+                </text>
+              </g>
+            )}
+
+            {viewMode === "full" && (
+              <g className="swimlanes">
+                <rect x={30} y={22} width={250} height={height - 44} rx="12" fill="rgba(56,189,248,0.015)" stroke="rgba(56,189,248,0.08)" strokeDasharray="5 5" />
+                <text x={45} y={44} fill="#38bdf8" fontSize="10" fontWeight="700" letterSpacing="0.08em">1. ENTRYPOINTS & ROUTES</text>
+                <text x={45} y={58} fill="#546b86" fontSize="8.5">Public HTTP endpoints & event handlers</text>
+
+                <rect x={320} y={22} width={250} height={height - 44} rx="12" fill="rgba(192,132,252,0.015)" stroke="rgba(192,132,252,0.08)" strokeDasharray="5 5" />
+                <text x={335} y={44} fill="#c084fc" fontSize="10" fontWeight="700" letterSpacing="0.08em">2. CORE SERVICES</text>
+                <text x={335} y={58} fill="#546b86" fontSize="8.5">Business domain orchestrators</text>
+
+                <rect x={610} y={22} width={250} height={height - 44} rx="12" fill="rgba(129,140,248,0.015)" stroke="rgba(129,140,248,0.08)" strokeDasharray="5 5" />
+                <text x={625} y={44} fill="#818cf8" fontSize="10" fontWeight="700" letterSpacing="0.08em">3. DOMAIN MODULES</text>
+                <text x={625} y={58} fill="#546b86" fontSize="8.5">Specialized helpers & security</text>
+
+                <rect x={900} y={22} width={250} height={height - 44} rx="12" fill="rgba(52,211,153,0.015)" stroke="rgba(52,211,153,0.08)" strokeDasharray="5 5" />
+                <text x={915} y={44} fill="#34d399" fontSize="10" fontWeight="700" letterSpacing="0.08em">4. DATA & STORAGE</text>
+                <text x={915} y={58} fill="#546b86" fontSize="8.5">Database access & utilities</text>
+              </g>
+            )}
+
+            {/* Smooth Bézier Curved Dependency Connectors */}
             {graph.links.map((link) => {
               const srcPos = getNodePos(link.from);
               const tgtPos = getNodePos(link.to);
@@ -393,7 +564,6 @@ function GraphCanvas({
               const isAffectedLink = affectedIds.has(link.from) && affectedIds.has(link.to);
               const isHoveredLink = hoveredNodeId && (link.from === hoveredNodeId || link.to === hoveredNodeId);
 
-              // In blast mode, unrelated links become quiet
               const isQuiet =
                 viewMode === "blast" &&
                 selectedId &&
@@ -401,43 +571,79 @@ function GraphCanvas({
                 !affectedIds.has(link.from) &&
                 !affectedIds.has(link.to);
 
-              // Calculate angle and boundary offsets
-              const angle = Math.atan2(tgtPos.y - srcPos.y, tgtPos.x - srcPos.x);
-              const targetRadius = link.to === selectedId ? 16 : affectedIds.has(link.to) ? 12 : 9;
-              const sourceRadius = link.from === selectedId ? 16 : affectedIds.has(link.from) ? 12 : 9;
+              let x1: number, y1: number, x2: number, y2: number;
+              let pathD: string;
 
-              const x1 = srcPos.x + Math.cos(angle) * (sourceRadius + 1);
-              const y1 = srcPos.y + Math.sin(angle) * (sourceRadius + 1);
-              const x2 = tgtPos.x - Math.cos(angle) * (targetRadius + 5);
-              const y2 = tgtPos.y - Math.sin(angle) * (targetRadius + 5);
-
-              const marker = isDirectCall
-                ? "url(#arrowhead-active)"
-                : isAffectedLink
-                ? "url(#arrowhead-cyan)"
-                : "url(#arrowhead)";
+              if (tgtPos.x > srcPos.x + 30) {
+                // Left-to-right flow
+                x1 = srcPos.x + CARD_W / 2;
+                y1 = srcPos.y;
+                x2 = tgtPos.x - CARD_W / 2;
+                y2 = tgtPos.y;
+                const dx = Math.abs(x2 - x1);
+                const curvature = Math.max(30, dx * 0.45);
+                pathD = `M ${x1} ${y1} C ${x1 + curvature} ${y1}, ${x2 - curvature} ${y2}, ${x2} ${y2}`;
+              } else if (tgtPos.x < srcPos.x - 30) {
+                // Right-to-left backward call
+                x1 = srcPos.x - CARD_W / 2;
+                y1 = srcPos.y;
+                x2 = tgtPos.x + CARD_W / 2;
+                y2 = tgtPos.y;
+                const dx = Math.abs(x2 - x1);
+                const curvature = Math.max(30, dx * 0.45);
+                pathD = `M ${x1} ${y1} C ${x1 - curvature} ${y1}, ${x2 + curvature} ${y2}, ${x2} ${y2}`;
+              } else {
+                // Same column loop
+                x1 = srcPos.x + CARD_W / 2;
+                y1 = srcPos.y;
+                x2 = tgtPos.x + CARD_W / 2;
+                y2 = tgtPos.y;
+                const dy = Math.abs(y2 - y1);
+                const loopWidth = Math.max(35, Math.min(65, dy * 0.45));
+                pathD = `M ${x1} ${y1} C ${x1 + loopWidth} ${y1}, ${x2 + loopWidth} ${y2}, ${x2} ${y2}`;
+              }
 
               let linkClass = "graph-link";
-              if (isDirectCall) linkClass += " active";
-              else if (isAffectedLink) linkClass += " affected-path";
-              else if (isQuiet) linkClass += " quiet";
+              let markerId = "url(#arrow-default)";
+              let streamClass = "";
+
+              if (isDirectCall) {
+                linkClass += " active";
+                markerId = "url(#arrow-amber)";
+                streamClass = "flow-stream";
+              } else if (isAffectedLink) {
+                linkClass += " affected-path";
+                markerId = "url(#arrow-cyan)";
+                streamClass = "flow-stream cyan-stream";
+              } else if (link.from === selectedId) {
+                linkClass += " callee-path";
+                markerId = "url(#arrow-green)";
+              } else if (transitiveAffected.has(link.from) || transitiveAffected.has(link.to)) {
+                linkClass += " transitive-path";
+                markerId = "url(#arrow-danger)";
+                streamClass = "flow-stream danger-stream";
+              } else if (isQuiet) {
+                linkClass += " quiet";
+                markerId = "url(#arrow-quiet)";
+              }
 
               return (
-                <line
-                  key={`${link.from}-${link.to}`}
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  className={linkClass}
-                  markerEnd={marker}
-                  style={isHoveredLink ? { stroke: "var(--amber)", strokeWidth: 2, strokeOpacity: 1 } : undefined}
-                />
+                <g key={`${link.from}->${link.to}`}>
+                  <path
+                    d={pathD}
+                    className={linkClass}
+                    markerEnd={markerId}
+                    style={isHoveredLink ? { stroke: "var(--amber)", strokeWidth: 2.2, strokeOpacity: 1 } : undefined}
+                  />
+                  {streamClass && !isQuiet && (
+                    <path d={pathD} className={streamClass} />
+                  )}
+                </g>
               );
             })}
 
-            {/* 2. Physical Draggable Nodes */}
-            {graph.nodes.map((node, index) => {
+            {/* Professional Interactive Node Cards */}
+            {graph.nodes.map((node) => {
               const pos = getNodePos(node.id);
               if (!pos) return null;
 
@@ -445,10 +651,9 @@ function GraphCanvas({
               const isAffected = affectedIds.has(node.id);
               const isCaller = directCallers.has(node.id);
               const isCallee = directCallees.has(node.id);
-              const isHovered = hoveredNodeId === node.id;
+              const isTransitive = transitiveAffected.has(node.id);
               const isDragging = draggingNodeId === node.id;
 
-              // In blast mode, unrelated nodes are visually quiet rather than disappearing
               const isQuiet =
                 viewMode === "blast" &&
                 selectedId !== null &&
@@ -457,19 +662,35 @@ function GraphCanvas({
                 !isCaller &&
                 !isCallee;
 
-              const color = isSelected
-                ? "#ffb449"
-                : isAffected
-                ? "#75d8ff"
-                : accents[index % accents.length];
+              const meta = getNodeKindMeta(node);
+              const isMatchSpotlight = spotlight
+                ? node.name.toLowerCase().includes(spotlight.toLowerCase()) || node.file.toLowerCase().includes(spotlight.toLowerCase())
+                : true;
 
-              const dotRadius = isSelected ? 15 : isAffected ? 11 : isQuiet ? 7 : 8;
+              let borderColor = "rgba(165, 183, 208, 0.16)";
+              let statusBadge: { label: string; bg: string; color: string; width: number } | null = null;
+
+              if (isSelected) {
+                borderColor = "#ffb449";
+                statusBadge = { label: "TARGET", bg: "rgba(255, 180, 73, 0.22)", color: "#ffb449", width: 48 };
+              } else if (isCaller) {
+                borderColor = "#38bdf8";
+                statusBadge = { label: "CALLER", bg: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", width: 48 };
+              } else if (isCallee) {
+                borderColor = "#34d399";
+                statusBadge = { label: "CALLEE", bg: "rgba(52, 211, 153, 0.2)", color: "#34d399", width: 48 };
+              } else if (isTransitive) {
+                borderColor = "#fb7185";
+                statusBadge = { label: "AFFECTED", bg: "rgba(251, 113, 133, 0.2)", color: "#fb7185", width: 56 };
+              }
+
+              const truncatedName = node.name.length > 21 ? `${node.name.slice(0, 19)}…` : node.name;
 
               return (
                 <g
                   key={node.id}
-                  className={`graph-node ${isQuiet ? "quiet" : ""} ${isDragging ? "is-dragging" : ""}`}
-                  transform={`translate(${pos.x} ${pos.y})`}
+                  className={`graph-node-card ${isSelected ? "is-selected" : ""} ${isCaller ? "is-caller" : ""} ${isCallee ? "is-callee" : ""} ${isTransitive ? "is-transitive" : ""} ${isQuiet || !isMatchSpotlight ? "is-quiet" : ""} ${isDragging ? "is-dragging" : ""}`}
+                  transform={`translate(${pos.x - CARD_W / 2} ${pos.y - CARD_H / 2})`}
                   onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
                   onMouseEnter={() => setHoveredNodeId(node.id)}
                   onMouseLeave={() => setHoveredNodeId(null)}
@@ -478,41 +699,175 @@ function GraphCanvas({
                   aria-label={`Function ${node.name}`}
                   onKeyDown={(e) => e.key === "Enter" && onSelect(node.id)}
                 >
-                  {/* Subtle rotating halo for selected node */}
-                  {isSelected && <circle r="26" className="node-halo" />}
+                  {/* Selected Halo Pulse */}
+                  {isSelected && (
+                    <rect
+                      x="-5"
+                      y="-5"
+                      width={CARD_W + 10}
+                      height={CARD_H + 10}
+                      rx="13"
+                      className="card-glow-halo"
+                    />
+                  )}
 
-                  {/* Outer ring */}
-                  <circle
-                    r={isSelected ? 19 : isAffected ? 15 : dotRadius + 3}
-                    fill="none"
-                    stroke={color}
-                    strokeOpacity={isSelected ? 0.5 : isAffected ? 0.35 : 0.2}
-                    strokeWidth={isSelected ? 1.5 : 1}
+                  {/* Card Base Container */}
+                  <rect
+                    width={CARD_W}
+                    height={CARD_H}
+                    rx="9"
+                    className="card-base"
+                    stroke={borderColor}
+                    strokeWidth={isSelected ? 2 : isCaller || isCallee || isTransitive ? 1.5 : 1}
                   />
 
-                  {/* Core dot */}
-                  <circle r={dotRadius} fill={color} className="node-dot" />
+                  {/* Left Category Accent Strip */}
+                  <rect
+                    x="0"
+                    y="0"
+                    width="4"
+                    height={CARD_H}
+                    rx="2"
+                    fill={meta.accentColor}
+                  />
 
-                  {/* Function label */}
+                  {/* Category Pill on Top Left */}
+                  <rect
+                    x="10"
+                    y="8"
+                    width={meta.tagWidth}
+                    height="14"
+                    rx="3"
+                    fill={meta.accentColor}
+                    fillOpacity="0.16"
+                  />
                   <text
-                    y={isSelected ? 34 : 26}
+                    x={10 + meta.tagWidth / 2}
+                    y="18.5"
                     textAnchor="middle"
-                    className={`node-label ${isSelected ? "selected" : isAffected ? "affected" : ""}`}
+                    fill={meta.accentColor}
+                    fontSize="8"
+                    fontWeight="700"
+                    letterSpacing="0.06em"
                   >
-                    {node.name}
+                    {meta.tag}
                   </text>
 
-                  {/* File label (only show on selected, affected, or hovered to avoid clutter) */}
-                  {(isSelected || isAffected || isHovered || !isQuiet) && (
-                    <text y={isSelected ? 48 : 39} textAnchor="middle" className="node-file">
-                      {shortFile(node.file)}
-                    </text>
+                  {/* Status Badge on Top Right */}
+                  {statusBadge && (
+                    <>
+                      <rect
+                        x={CARD_W - 10 - statusBadge.width}
+                        y="8"
+                        width={statusBadge.width}
+                        height="14"
+                        rx="3"
+                        fill={statusBadge.bg}
+                      />
+                      <text
+                        x={CARD_W - 10 - statusBadge.width / 2}
+                        y="18.5"
+                        textAnchor="middle"
+                        fill={statusBadge.color}
+                        fontSize="7.5"
+                        fontWeight="700"
+                        letterSpacing="0.05em"
+                      >
+                        {statusBadge.label}
+                      </text>
+                    </>
                   )}
+
+                  {/* Function Symbol Name */}
+                  <text
+                    x="12"
+                    y="36"
+                    className="card-title"
+                    fontSize="12"
+                    fontWeight="600"
+                    fill={isSelected ? "var(--amber)" : "#f8fafc"}
+                  >
+                    {truncatedName}
+                  </text>
+
+                  {/* File & Line subtitle */}
+                  <text
+                    x="12"
+                    y="49"
+                    className="card-subtitle"
+                    fontSize="9"
+                    fill="#64748b"
+                  >
+                    {shortFile(node.file)}:{node.line}
+                  </text>
+
+                  {/* Left Input Port */}
+                  <circle
+                    cx="0"
+                    cy={CARD_H / 2}
+                    r="3.5"
+                    className="port-dot"
+                    fill={isAffected ? "#38bdf8" : "#475569"}
+                  />
+
+                  {/* Right Output Port */}
+                  <circle
+                    cx={CARD_W}
+                    cy={CARD_H / 2}
+                    r="3.5"
+                    className="port-dot"
+                    fill={isSelected ? "var(--amber)" : "#475569"}
+                  />
                 </g>
               );
             })}
           </g>
         </svg>
+
+        {/* Hover Inspector HUD Micro-Card */}
+        {hoveredNode && (
+          <div
+            className="graph-hover-hud"
+            style={{
+              left: Math.min(
+                width - 270,
+                Math.max(20, getNodePos(hoveredNode.id).x * zoom + pan.x - 100)
+              ),
+              top: Math.max(16, getNodePos(hoveredNode.id).y * zoom + pan.y - 120),
+            }}
+          >
+            <div className="hud-header">
+              <span className="hud-tag" style={{ color: getNodeKindMeta(hoveredNode).accentColor }}>
+                {getNodeKindMeta(hoveredNode).category}
+              </span>
+              <span className="hud-status">
+                {hoveredNode.id === selectedId
+                  ? "Target Origin"
+                  : directCallers.has(hoveredNode.id)
+                  ? "Direct Caller"
+                  : directCallees.has(hoveredNode.id)
+                  ? "Direct Callee"
+                  : affectedIds.has(hoveredNode.id)
+                  ? "In Blast Radius"
+                  : "Unaffected"}
+              </span>
+            </div>
+            <div className="hud-title">{hoveredNode.name}()</div>
+            <div className="hud-file">{hoveredNode.file}:{hoveredNode.line}</div>
+            <div className="hud-stats">
+              <span>
+                <strong>{graph.links.filter((l) => l.to === hoveredNode.id).length}</strong> callers
+              </span>
+              <span>•</span>
+              <span>
+                <strong>{graph.links.filter((l) => l.from === hoveredNode.id).length}</strong> callees
+              </span>
+              {affectedIds.has(hoveredNode.id) && (
+                <span className="hud-danger-badge">Impacted</span>
+              )}
+            </div>
+          </div>
+        )}
 
         {graph.nodes.length === 0 && (
           <div className="graph-empty">
@@ -523,14 +878,15 @@ function GraphCanvas({
         )}
 
         <div className="graph-legend">
-          <span><i className="legend-dot selected-dot" /> Selected</span>
-          <span><i className="legend-dot affected-dot" /> In blast radius</span>
-          <span><i className="legend-dot idle-dot" /> Unaffected</span>
+          <span><i className="legend-dot selected-dot" /> Target</span>
+          <span><i className="legend-dot affected-dot" /> Caller (Impacted)</span>
+          <span><i className="legend-dot callee-dot" /> Callee</span>
+          <span><i className="legend-dot idle-dot" /> Neutral</span>
         </div>
 
         <div className="graph-hud">
           <span><CircleDot size={13} /> {graph.nodes.length} nodes</span>
-          <span><ArrowUpRight size={13} /> {graph.links.length} edges</span>
+          <span><ArrowUpRight size={13} /> {graph.links.length} relationships</span>
         </div>
       </div>
     </>
@@ -606,7 +962,7 @@ function ImpactList({ nodes, onFocus, empty }: { nodes: FunctionNode[]; onFocus:
 function ImpactDetails({ result, onFocus }: { result: ImpactResult; onFocus: (id: string) => void }) {
   const [pathId, setPathId] = useState<string | null>(result.impactPaths[0]?.id ?? null);
   useEffect(() => { setPathId(result.impactPaths[0]?.id ?? null); }, [result.impactPaths]);
-  const activePath = result.impactPaths.find((path) => path.id === pathId);
+  const activePath = result.impactPaths.find((path) => path.id === pathId) ?? result.impactPaths[0] ?? null;
   const factors = result.riskFactors;
 
   return (
@@ -652,20 +1008,21 @@ function ImpactDetails({ result, onFocus }: { result: ImpactResult; onFocus: (id
               {result.impactPaths.slice(0, 5).map((path) => (
                 <button
                   key={path.id}
-                  className={path.id === pathId ? "active" : ""}
+                  className={path.id === (activePath?.id ?? pathId) ? "active" : ""}
                   onClick={() => setPathId(path.id)}
+                  title={path.label}
                 >
-                  {path.label}
+                  {path.label || path.nodes.map((n) => n.name).join(" → ") || `Path ${path.id}`}
                 </button>
               ))}
             </div>
-            {activePath && (
+            {activePath && activePath.nodes && activePath.nodes.length > 0 && (
               <div className="path-detail">
                 <span>WHY AFFECTED</span>
                 <div>
                   {activePath.nodes.map((node, index) => (
-                    <span key={node.id}>
-                      <button onClick={() => onFocus(node.id)}>{node.name}</button>
+                    <span key={node.id || index}>
+                      <button onClick={() => onFocus(node.id)}>{node.name || "Unknown"}</button>
                       {index < activePath.nodes.length - 1 && <b>→</b>}
                     </span>
                   ))}
@@ -767,9 +1124,14 @@ export default function Home() {
   const [repositories, setRepositories] = useState<Array<{ id: string; name: string }>>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  const initialRepoRef = useRef<boolean>(
+    typeof window !== "undefined" && Boolean(new URLSearchParams(window.location.search).get("repo"))
+  );
+
   const demoQuery = trpc.blast.demo.useQuery(undefined, { staleTime: Infinity });
   const analyzeMutation = trpc.blast.analyze.useMutation({
     onSuccess: (data) => {
+      initialRepoRef.current = false;
       setProjectId(data.projectId);
       setRepositories((current) => [
         { id: data.projectId, name: data.graph.slug },
@@ -778,8 +1140,17 @@ export default function Home() {
       setSelectedId(null);
       setViewMode("blast");
       toast.success(`Mapped ${data.graph.stats.functions} functions from ${data.graph.slug}`);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("repo");
+        url.searchParams.set("projectId", data.projectId);
+        window.history.replaceState({}, "", url.toString());
+      }
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      initialRepoRef.current = false;
+      toast.error(error.message);
+    },
   });
 
   useEffect(() => {
@@ -795,13 +1166,16 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (initialRepoRef.current && (analyzeMutation.isPending || !analyzeMutation.isError)) {
+      return;
+    }
     if (!projectId && demoQuery.data?.projectId) {
       setProjectId(demoQuery.data.projectId);
       if (demoQuery.data.graph.slug) {
         setRepositories([{ id: demoQuery.data.projectId, name: demoQuery.data.graph.slug }]);
       }
     }
-  }, [demoQuery.data, projectId]);
+  }, [demoQuery.data, projectId, analyzeMutation.isPending, analyzeMutation.isError]);
 
   const graphQuery = trpc.blast.graph.useQuery(
     { projectId: projectId ?? "" },
@@ -833,11 +1207,11 @@ export default function Home() {
       .slice(0, 100);
   }, [functionNodes, query]);
 
-  function selectNode(id: string) {
+  const selectNode = useCallback((id: string) => {
     setSelectedId(id);
     setViewMode("blast");
     setMobilePanel("impact");
-  }
+  }, []);
 
   function analyzeRepo() {
     if (!repoInput.trim() || analyzeMutation.isPending) return;

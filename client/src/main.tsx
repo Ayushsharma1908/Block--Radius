@@ -38,7 +38,8 @@ queryClient.getMutationCache().subscribe(event => {
 });
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-const trpcUrl = apiBaseUrl ? `${apiBaseUrl}/api/trpc` : "/api/trpc";
+const isLocalhost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const trpcUrl = (!isLocalhost && apiBaseUrl) ? `${apiBaseUrl}/api/trpc` : "/api/trpc";
 
 const trpcClient = trpc.createClient({
   links: [

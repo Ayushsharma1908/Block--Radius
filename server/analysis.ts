@@ -60,7 +60,7 @@ async function getDriver(): Promise<Driver | null> {
     driverPromise = Promise.resolve(neo4j.driver(
       process.env.NEO4J_URI as string,
       neo4j.auth.basic(process.env.NEO4J_USER as string, process.env.NEO4J_PASSWORD as string),
-      { maxConnectionPoolSize: 20, connectionAcquisitionTimeout: 15_000 },
+      { maxConnectionPoolSize: 20, connectionAcquisitionTimeout: 60_000, connectionTimeout: 30_000 },
     ));
   }
   return driverPromise;
@@ -82,16 +82,57 @@ function normalizeRepo(repo: string) {
 
 async function loadGithubFiles(repo: string): Promise<SourceFile[]> {
   const { owner, name } = normalizeRepo(repo);
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "blast-radius-gemini" };
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "blast-radius-gemini",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
   const treeResponse = await fetch(`https://api.github.com/repos/${owner}/${name}/git/trees/HEAD?recursive=1`, { headers });
-  if (!treeResponse.ok) throw new Error(`GitHub could not load ${owner}/${name} (${treeResponse.status}).`);
+  if (!treeResponse.ok) {
+    if (treeResponse.status === 403 || treeResponse.status === 429) {
+      throw new Error(`GitHub API rate limit exceeded. Please wait a moment or configure GITHUB_TOKEN.`);
+    }
+    if (treeResponse.status === 404) {
+      throw new Error(`GitHub repository "${owner}/${name}" was not found or is private.`);
+    }
+    throw new Error(`GitHub could not load ${owner}/${name} (${treeResponse.status}).`);
+  }
   const tree = (await treeResponse.json()) as { tree?: Array<{ path: string; type: string }> };
   const paths = (tree.tree ?? []).filter((item) => item.type === "blob" && CODE_EXT.test(item.path) && !SKIP_PATH.test(item.path) && !item.path.endsWith(".d.ts")).slice(0, 160);
-  const files = await Promise.all(paths.map(async ({ path }) => {
-    const response = await fetch(`https://raw.githubusercontent.com/${owner}/${name}/HEAD/${path}`, { headers: { "User-Agent": headers["User-Agent"] } });
-    return response.ok ? { path, content: await response.text() } : null;
-  }));
-  return files.filter((file): file is SourceFile => Boolean(file));
+
+  // Fetch in controlled batches of 10 to prevent socket exhaustion and undici timeouts
+  const BATCH_SIZE = 10;
+  const files: SourceFile[] = [];
+  for (let i = 0; i < paths.length; i += BATCH_SIZE) {
+    const batch = paths.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async ({ path }) => {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 12000);
+          const response = await fetch(`https://raw.githubusercontent.com/${owner}/${name}/HEAD/${path}`, {
+            headers: {
+              "User-Agent": "blast-radius-gemini",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (!response.ok) return null;
+          const content = await response.text();
+          return { path, content };
+        } catch {
+          return null;
+        }
+      })
+    );
+    for (const res of batchResults) {
+      if (res) files.push(res);
+    }
+  }
+
+  return files;
 }
 
 function relativePath(filePath: string) {
@@ -414,6 +455,28 @@ function summaryFor(result: Omit<ImpactResult, "deterministicSummary">) {
   return `${label} on ${selectedName} reaches ${factors.affectedFunctions} upstream function${factors.affectedFunctions === 1 ? "" : "s"} across ${factors.affectedFiles} file${factors.affectedFiles === 1 ? "" : "s"}, with depth ${factors.dependencyDepth}, fan-in ${factors.fanIn}, fan-out ${factors.fanOut}, ${factors.apiExposure} API surface${factors.apiExposure === 1 ? "" : "s"}, ${factors.databaseUsage} database operation${factors.databaseUsage === 1 ? "" : "s"}, and ${factors.testRelationships} connected test${factors.testRelationships === 1 ? "" : "s"}.`;
 }
 
+const simulationCache = new Map<string, { timestamp: number; result: ImpactResult }>();
+const CACHE_TTL_MS = 120_000;
+const MAX_CACHE_SIZE = 200;
+
+function getCachedSimulation(key: string): ImpactResult | null {
+  const cached = simulationCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
+    simulationCache.delete(key);
+    return null;
+  }
+  return cached.result;
+}
+
+function setCachedSimulation(key: string, result: ImpactResult): void {
+  if (simulationCache.size >= MAX_CACHE_SIZE) {
+    const oldestKey = simulationCache.keys().next().value;
+    if (oldestKey) simulationCache.delete(oldestKey);
+  }
+  simulationCache.set(key, { timestamp: Date.now(), result });
+}
+
 function buildDemoImpact(selectedId: string, changeType: ChangeType): ImpactResult {
   const selected = demoGraph.nodes.find((node) => node.id === selectedId) ?? null;
   const callers = demoGraph.links.filter((link) => link.to === selectedId).map((link) => demoGraph.nodes.find((node) => node.id === link.from)).filter(Boolean) as FunctionNode[];
@@ -424,9 +487,103 @@ function buildDemoImpact(selectedId: string, changeType: ChangeType): ImpactResu
   const queue = callers.map((node) => node.id);
   while (queue.length) { const current = queue.shift(); if (!current || all.has(current)) continue; all.add(current); queue.push(...(reverse.get(current) ?? [])); }
   const affectedFunctions = demoGraph.nodes.filter((node) => all.has(node.id));
-  const base = { selectedId, selected, changeType, directCallers: callers, directCallees: callees, directImpactIds: callers.map((node) => node.id), transitiveImpactIds: affectedFunctions.filter((node) => !callers.some((caller) => caller.id === node.id)).map((node) => node.id), affectedIds: affectedFunctions.map((node) => node.id), affectedFunctions, affectedFiles: [], affectedClasses: [], affectedApis: [], affectedDatabases: [], affectedTests: [], impactPaths: [], totals: { functions: affectedFunctions.length, files: 0, classes: 0, apis: 0, databases: 0, tests: 0 } };
-  const riskFactors = riskFor(base, affectedFunctions.length ? 1 : 0);
-  const result = { ...base, riskFactors, before: emptySnapshot("Demo fallback has no persisted snapshot."), after: emptySnapshot("Demo fallback has no persisted snapshot."), noTestsDetected: true };
+  const impactPaths: ImpactPath[] = [];
+  let pathIdx = 0;
+  for (const caller of callers.slice(0, 5)) {
+    if (selected) {
+      impactPaths.push({
+        id: `path-${pathIdx++}`,
+        nodeIds: [caller.id, selected.id],
+        nodes: [caller, selected],
+        relations: ["CALLS"],
+        label: `${caller.name} → ${selected.name}`,
+      });
+    }
+  }
+  for (const fn of affectedFunctions.slice(0, 5)) {
+    if (callers.some((c) => c.id === fn.id)) continue;
+    const intermediate = callers.find((c) =>
+      demoGraph.links.some((l) => l.from === fn.id && l.to === c.id)
+    );
+    if (intermediate && selected) {
+      impactPaths.push({
+        id: `path-${pathIdx++}`,
+        nodeIds: [fn.id, intermediate.id, selected.id],
+        nodes: [fn, intermediate, selected],
+        relations: ["CALLS", "CALLS"],
+        label: `${fn.name} → ${intermediate.name} → ${selected.name}`,
+      });
+    }
+  }
+
+  const filePaths = [...new Set([selected?.file, ...affectedFunctions.map((n) => n.file)].filter(Boolean) as string[])];
+  const affectedFiles: FunctionNode[] = filePaths.map((file) => ({
+    id: file,
+    name: file.split("/").pop() ?? file,
+    file,
+    line: 1,
+    kind: "file",
+    label: "File",
+  }));
+  const affectedApis = affectedFunctions.filter((node) => node.kind === "route");
+  const affectedDatabases = affectedFunctions.filter((node) => node.file.startsWith("db/"));
+
+  // Build realistic snapshots for demo graph
+  const scopeIds = new Set([selectedId, ...callers.map((n) => n.id), ...callees.map((n) => n.id), ...affectedFunctions.map((n) => n.id)]);
+  const beforeNodes = demoGraph.nodes.filter((n) => scopeIds.has(n.id));
+  const beforeLinks = demoGraph.links.filter((l) => scopeIds.has(l.from) && scopeIds.has(l.to));
+  const before: ImpactSnapshot = {
+    nodes: beforeNodes,
+    links: beforeLinks,
+    note: "Demo graph relationships before mutation.",
+  };
+
+  const afterNodes = changeType === "remove" ? beforeNodes.filter((n) => n.id !== selectedId) : beforeNodes;
+  const afterLinks = beforeLinks
+    .filter((l) => !(changeType === "remove" && (l.from === selectedId || l.to === selectedId)))
+    .map((l) => ({
+      ...l,
+      state: (changeType === "rename" || affectedFunctions.some((f) => f.id === l.from || f.id === l.to)
+        ? "affected"
+        : "existing") as "affected" | "existing",
+    }));
+  const after: ImpactSnapshot = {
+    nodes: afterNodes,
+    links: afterLinks,
+    note: changeType === "remove"
+      ? "Selected function and connected calls removed."
+      : changeType === "rename"
+      ? "Function and call sites flagged for renaming."
+      : "Affected upstream callers highlighted for signature mutation.",
+  };
+
+  const base = {
+    selectedId,
+    selected,
+    changeType,
+    directCallers: callers,
+    directCallees: callees,
+    directImpactIds: callers.map((node) => node.id),
+    transitiveImpactIds: affectedFunctions.filter((node) => !callers.some((caller) => caller.id === node.id)).map((node) => node.id),
+    affectedIds: affectedFunctions.map((node) => node.id),
+    affectedFunctions,
+    affectedFiles,
+    affectedClasses: [],
+    affectedApis,
+    affectedDatabases,
+    affectedTests: [],
+    impactPaths,
+    totals: {
+      functions: affectedFunctions.length,
+      files: affectedFiles.length,
+      classes: 0,
+      apis: affectedApis.length,
+      databases: affectedDatabases.length,
+      tests: 0,
+    },
+  };
+  const riskFactors = riskFor(base, affectedFunctions.length ? 2 : 0);
+  const result = { ...base, riskFactors, before, after, noTestsDetected: true };
   return { ...result, deterministicSummary: summaryFor(result) };
 }
 
@@ -448,7 +605,15 @@ async function snapshotFor(session: ReturnType<Driver["session"]>, projectId: st
 }
 
 export async function simulateChange(projectId: string, selectedId: string, changeType: ChangeType): Promise<ImpactResult> {
-  if (!hasNeo4jCredentials()) return buildDemoImpact(selectedId, changeType);
+  const cacheKey = `${projectId}::${selectedId}::${changeType}`;
+  const cached = getCachedSimulation(cacheKey);
+  if (cached) return cached;
+
+  if (!hasNeo4jCredentials()) {
+    const demoResult = buildDemoImpact(selectedId, changeType);
+    setCachedSimulation(cacheKey, demoResult);
+    return demoResult;
+  }
   const driver = await getDriver();
   if (!driver) throw new Error("Neo4j AuraDB credentials are not configured.");
   const session = driver.session();
@@ -480,12 +645,48 @@ export async function simulateChange(projectId: string, selectedId: string, chan
     const affectedApis = neoNodeList(record, "apis", "API");
     const affectedDatabases = neoNodeList(record, "databases", "Database");
     const affectedTests = neoNodeList(record, "tests", "Test");
-    const pathResult = await session.run(`MATCH p=(dependent:Function { projectId: $projectId })-[:CALLS*1..6]->(selected:Function { projectId: $projectId, id: $selectedId }) RETURN p LIMIT 40`, { projectId, selectedId });
-    const impactPaths: ImpactPath[] = pathResult.records.map((pathRecord, index) => {
-      const path = pathRecord.get("p") as { nodes?: Neo4jNode[]; segments?: Array<{ relationship: { type: string } }> };
-      const pathNodes = (path.nodes ?? []).map((node) => graphNodeFromNeo4j(node, ["Function"]));
-      return { id: `path-${index}`, nodeIds: pathNodes.map((node) => node.id), nodes: pathNodes, relations: (path.segments ?? []).map((segment) => segment.relationship.type), label: pathNodes.map((node) => node.name).join(" → ") };
-    });
+    const pathResult = await session.run(
+      `MATCH p=(dependent:Function { projectId: $projectId })-[:CALLS*1..6]->(selected:Function { projectId: $projectId, id: $selectedId }) RETURN p, nodes(p) AS pathNodes LIMIT 40`,
+      { projectId, selectedId }
+    );
+    const impactPaths: ImpactPath[] = pathResult.records
+      .map((pathRecord, index) => {
+        const path = pathRecord.get("p") as any;
+        let rawNodes: Neo4jNode[] = [];
+
+        if (pathRecord.has("pathNodes")) {
+          const fromNodes = pathRecord.get("pathNodes");
+          if (Array.isArray(fromNodes)) rawNodes = fromNodes as Neo4jNode[];
+        }
+
+        if (!rawNodes.length && path) {
+          if (path.segments && path.segments.length > 0) {
+            rawNodes = [path.start, ...path.segments.map((s: any) => s.end)].filter(Boolean);
+          } else if (path.start) {
+            rawNodes = [path.start, ...(path.end && path.end !== path.start ? [path.end] : [])];
+          } else if (Array.isArray(path.nodes)) {
+            rawNodes = path.nodes;
+          }
+        }
+
+        const pathNodes = rawNodes.map((node) => graphNodeFromNeo4j(node, ["Function"]));
+        const relations = path?.segments
+          ? path.segments.map((s: any) => s.relationship?.type || "CALLS")
+          : [];
+        const label = pathNodes
+          .map((node) => node.name)
+          .filter(Boolean)
+          .join(" → ");
+
+        return {
+          id: `path-${index}`,
+          nodeIds: pathNodes.map((node) => node.id),
+          nodes: pathNodes,
+          relations,
+          label: label || `Path ${index + 1}`,
+        };
+      })
+      .filter((item) => item.nodes.length > 0);
     const scopeIds = [selectedId, ...directCallers.map((node) => node.id), ...directCallees.map((node) => node.id), ...affectedFunctions.map((node) => node.id), ...affectedFiles.map((node) => node.id), ...affectedClasses.map((node) => node.id), ...affectedApis.map((node) => node.id), ...affectedDatabases.map((node) => node.id), ...affectedTests.map((node) => node.id)];
     const before = await snapshotFor(session, projectId, scopeIds, "Current relationships from Neo4j.", changeType, selectedId);
     const afterLinks = before.links.filter((link) => !(changeType === "remove" && (link.from === selectedId || link.to === selectedId))).map((link) => ({ ...link, state: changeType === "rename" || affectedFunctions.some((node) => node.id === link.from || node.id === link.to) ? "affected" as const : "existing" as const }));
@@ -493,7 +694,9 @@ export async function simulateChange(projectId: string, selectedId: string, chan
     const base = { selectedId, selected, changeType, directCallers, directCallees, directImpactIds: directCallers.map((node) => node.id), transitiveImpactIds: affectedFunctions.filter((node) => !directCallers.some((caller) => caller.id === node.id)).map((node) => node.id), affectedIds: affectedFunctions.map((node) => node.id), affectedFunctions, affectedFiles, affectedClasses, affectedApis, affectedDatabases, affectedTests, impactPaths, totals: { functions: affectedFunctions.length, files: affectedFiles.length, classes: affectedClasses.length, apis: affectedApis.length, databases: affectedDatabases.length, tests: affectedTests.length } };
     const riskFactors = riskFor(base, dependencyDepth);
     const result = { ...base, riskFactors, before, after, noTestsDetected: affectedTests.length === 0 };
-    return { ...result, deterministicSummary: summaryFor(result) };
+    const finalResult = { ...result, deterministicSummary: summaryFor(result) };
+    setCachedSimulation(cacheKey, finalResult);
+    return finalResult;
   } finally {
     await session.close();
   }

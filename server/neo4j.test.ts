@@ -25,5 +25,5 @@ describe("Neo4j AuraDB configuration", () => {
     } finally {
       await driver.close();
     }
-  }, 20_000);
+  }, 30_000);
 });

@@ -167,6 +167,27 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react") || id.includes("wouter")) {
+              return "vendor-react";
+            }
+            if (id.includes("@tanstack") || id.includes("@trpc") || id.includes("superjson")) {
+              return "vendor-trpc";
+            }
+            if (id.includes("lucide-react")) {
+              return "vendor-icons";
+            }
+            if (id.includes("@radix-ui") || id.includes("framer-motion")) {
+              return "vendor-ui";
+            }
+          }
+        },
+      },
+    },
   },
   server: {
     host: true,

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { describe, expect, it } from "vitest";
 import { analyzeSource, getDemoGraphForTests, getGraph, simulateChange } from "./analysis";
 
@@ -35,5 +36,5 @@ describe("blast-radius graph analysis", () => {
     expect(impact.riskFactors.fanIn).toBeGreaterThan(0);
     expect(impact.riskFactors.fanOut).toBeGreaterThan(0);
     expect(impact.totals.files).toBeGreaterThan(0);
-  }, 60_000);
+  }, 120_000);
 });
