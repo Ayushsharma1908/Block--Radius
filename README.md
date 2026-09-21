@@ -1,268 +1,142 @@
-⚡ BlastRadius
+# ⚡ BlastRadius
 
-
-Know what breaks before you ship.
+> **Know what breaks before you ship.**
 
 BlastRadius is an AI-assisted dependency intelligence platform that helps developers understand the potential impact of code changes before they are shipped.
 
 It transforms a repository into an interactive dependency graph, allowing developers to select functions, simulate hypothetical changes, trace direct and transitive dependencies, inspect risk factors, and identify potentially affected tests.
 
-Instead of only asking "What changed?", BlastRadius asks:
+Instead of only asking:
+> *"What changed?"*
 
+BlastRadius asks:
+> **"What could this change affect?"**
 
-"What could this change affect?"
+---
 
+## 🚀 What is BlastRadius?
 
-
-
-🚀 What is BlastRadius?
-
-Modern codebases are highly interconnected.
-
-A developer may change a single function without immediately realizing that it is used by multiple callers, APIs, database operations, or other parts of the application.
+Modern codebases are highly interconnected. A developer may change a single function without immediately realizing that it is used by multiple callers, APIs, database operations, or other parts of the application.
 
 BlastRadius maps these relationships into a dependency graph and lets developers explore the potential blast radius of a hypothetical change.
 
-Core workflow
+### Core Workflow
 
-Plain Text
-
-
+```text
 GitHub / Local Repository
           ↓
-     Code Analysis
+    Code Analysis
           ↓
-    Dependency Graph
+   Dependency Graph
           ↓
     Select Function
           ↓
-    Simulate Change
+   Simulate Change
           ↓
-   Blast Radius Analysis
+ Blast Radius Analysis
           ↓
- Risk + Test Impact + Explanation
+Risk + Test Impact + Explanation
+```
 
+---
 
+## ✨ Features
 
-
-
-
-✨ Features
-
-🔍 Repository Dependency Graph
-
+### 🔍 Repository Dependency Graph
 Analyze a TypeScript/JavaScript repository and build an interactive representation of its code dependencies.
 
-The graph can represent relationships between:
+The graph represents relationships between:
+- **Functions & Methods**
+- **Source Files**
+- **Classes**
+- **API Endpoints & HTTP Routes**
+- **Database Operations**
+- **Automated Tests**
+- **Other dependency surfaces**
 
-•
-Functions
+### 💥 Change Simulator
+Select any function and simulate 5 distinct hypothetical mutations:
+- **Change parameters** (signature mutation)
+- **Modify implementation** (internal logic refactor)
+- **Rename function** (identifier & import changes)
+- **Remove function** (breaking deletion)
+- **Change return type** (downstream contract break)
 
-•
-Files
+The system deterministically evaluates the impact of that mutation against the persisted Neo4j call graph.
 
-•
-Classes
+### 🕸️ Direct & Transitive Impact
+BlastRadius clearly distinguishes between:
+- **Direct impact**: Functions directly calling or called by the selected symbol.
+- **Transitive impact**: Functions reached through multiple indirect dependency levels ($N$-th degree callers).
 
-•
-APIs
+This makes it possible to understand not only immediate callers but also deeper ripple effects across services.
 
-•
-Database operations
-
-•
-Tests
-
-•
-Other dependency surfaces
-
-
-
-
-💥 Change Simulator
-
-Select a function and simulate different hypothetical changes:
-
-•
-Change parameters
-
-•
-Change implementation
-
-•
-Rename
-
-•
-Remove
-
-•
-Change return type
-
-The system then evaluates the potential impact of that change against the persisted dependency graph.
-
-
-
-
-🕸️ Direct & Transitive Impact
-
-BlastRadius distinguishes between:
-
-Direct impact
-
-Functions directly connected to the selected function.
-
-Transitive impact
-
-Functions reached through multiple dependency levels.
-
-This makes it possible to understand not only immediate callers but also deeper dependency chains.
-
-
-
-
-🧭 Impact Paths
-
-BlastRadius can show why a particular function or node is affected.
-
-Instead of simply saying:
-
-Plain Text
-
-
+### 🧭 Impact Paths
+BlastRadius exposes *why* a particular function is affected. Instead of simply stating:
+```text
 Function A is affected
+```
+The system exposes the exact traversal chain:
+```text
+Function A → Function B → Function C → Changed Target Function
+```
+This makes complex refactors transparent and easy to reason about.
 
+### 📊 Risk Analysis
+BlastRadius computes deterministic, graph-based metrics describing the risk surface of a change:
+- **Fan-in**: Number of upstream dependent callers
+- **Fan-out**: Number of downstream internal dependencies
+- **Dependency Depth**: Maximum depth of the transitive call tree
+- **API Exposure**: Number of affected public HTTP endpoints
+- **Database Operations**: Affected read/write database queries
+- **Test Coverage Ratio**: Proportion of affected functions with detected test relationships
+- **Affected Functions & Files**: Total volume of impacted source code
 
+### 🧪 Test Impact
+BlastRadius traces `TESTED_BY` relationships through the dependency graph to recommend exactly which test suites need to be rerun before opening a pull request.
 
-the system can expose the dependency path:
+### 🤖 Gemini-Assisted Review
+Gemini AI functions as a grounded explanation layer on top of verified graph facts:
 
-Plain Text
+```text
+Graph Data → Deterministic Analysis → Computed Impact → Gemini AI → Human-readable Risk Review
+```
 
+- The dependency graph remains the single source of truth.
+- **AI explains the impact. The graph determines the impact.**
 
-Function A
-    ↓
-Function B
-    ↓
-Function C
-    ↓
-Changed Function
+---
 
-
-
-This makes the result easier to reason about.
-
-
-
-
-📊 Risk Analysis
-
-BlastRadius calculates deterministic graph-based factors that help describe the potential risk surface of a change.
-
-Factors can include:
-
-•
-Fan-in
-
-•
-Fan-out
-
-•
-Dependency depth
-
-•
-API exposure
-
-•
-Database operations
-
-•
-Test coverage
-
-•
-Number of affected functions
-
-•
-Number of affected files
-
-The goal is to provide an explainable view of the change rather than a black-box score.
-
-
-
-
-🧪 Test Impact
-
-BlastRadius can identify connected tests through the dependency graph and highlight areas where test coverage may need attention.
-
-This can help developers focus testing around the affected portion of the repository.
-
-
-
-
-🤖 Gemini-Assisted Review
-
-Gemini is used as an explanation layer on top of the deterministic graph analysis.
-
-The architecture follows:
-
-Plain Text
-
-
-Graph Data
-    ↓
-Deterministic Analysis
-    ↓
-Computed Impact
-    ↓
-Gemini
-    ↓
-Human-readable Explanation
-
-
-
-The dependency graph remains the source of truth.
-
-
-AI explains the impact. The graph determines the impact.
-
-
-
-
-🧠 Why BlastRadius?
+## 🧠 Why BlastRadius?
 
 Traditional code navigation helps developers answer:
+> *"Where is this function used?"*
 
+BlastRadius is designed to help answer a much larger question:
+> **"If I change this function, what could be affected across the entire system?"**
 
-"Where is this function used?"
+This shifts dependency analysis from manual grep exploration toward an automated, change-aware engineering workflow.
 
-BlastRadius is designed to help answer a larger question:
+---
 
+## 🏗️ Architecture
 
-"If I change this function, what could be affected?"
-
-This shifts dependency analysis from manual exploration toward an interactive, change-aware workflow.
-
-
-
-
-🏗️ Architecture
-
-Plain Text
-
-
+```text
                  ┌─────────────────────┐
-                 │   GitHub Repository │
-                 │     / Local Repo    │
+                 │  GitHub Repository  │
+                 │    / Local Repo     │
                  └──────────┬──────────┘
                             │
                             ▼
                  ┌─────────────────────┐
-                 │   Repository Parser │
+                 │  Repository Parser  │
                  │   ts-morph / AST    │
                  └──────────┬──────────┘
                             │
                             ▼
                  ┌─────────────────────┐
-                 │     Neo4j AuraDB    │
-                 │   Dependency Graph  │
+                 │    Neo4j AuraDB     │
+                 │  Dependency Graph   │
                  └──────────┬──────────┘
                             │
                             ▼
@@ -277,534 +151,266 @@ Plain Text
         │   Risk   │  │   Test   │  │  Impact   │
         │ Analysis │  │  Impact  │  │   Paths   │
         └────┬─────┘  └────┬─────┘  └─────┬─────┘
-             └─────────────┼───────────────┘
+             └─────────────┼──────────────┘
                            ▼
                   ┌─────────────────┐
-                  │ Gemini Review   │
-                  │ Explanation     │
+                  │  Gemini Review  │
+                  │   Explanation   │
                   └────────┬────────┘
                            ▼
                   ┌─────────────────┐
                   │ React Dashboard │
-                  │ Interactive     │
+                  │   Interactive   │
                   │ Graph Workspace │
                   └─────────────────┘
-
-
-
-
-
-
-🛠️ Tech Stack
-
-Frontend
-
-•
-React
-
-•
-TypeScript
-
-•
-Vite
-
-•
-React Flow
-
-•
-Tailwind CSS
-
-•
-Lucide Icons
-
-•
-Framer Motion
-
-Backend
-
-•
-Node.js
-
-•
-TypeScript
-
-•
-Express/server layer
-
-Code Analysis
-
-•
-ts-morph
-
-•
-TypeScript Compiler API
-
-Graph Database
-
-•
-Neo4j AuraDB
-
-•
-Cypher
-
-AI
-
-•
-Google Gemini
-
-Repository Integration
-
-•
-GitHub API
-
-•
-Local repository analysis
-
-
-
-
-🎯 Product Workflow
-
-1. Add a repository
-
-Paste a GitHub repository URL or analyze a local repository.
-
-2. Analyze the repository
-
-BlastRadius parses the codebase and builds the dependency graph.
-
-3. Explore the graph
-
-Browse functions and dependency relationships through the interactive graph.
-
-4. Select a function
-
-Choose the function you are considering changing.
-
-5. Simulate a change
-
-Select a hypothetical change type.
-
-6. Inspect the blast radius
-
-Review:
-
-•
-Direct callers
-
-•
-Direct callees
-
-•
-Transitive dependencies
-
-•
-Impact paths
-
-•
-Affected files
-
-•
-APIs
-
-•
-Database operations
-
-•
-Tests
-
-7. Understand the risk
-
-Review graph-derived risk factors and Gemini's explanation.
-
-
-
-
-🖥️ Interface
-
-BlastRadius is designed around a developer-focused workspace:
-
-Plain Text
-
-
-┌──────────────────────────────────────────────────────────┐
-│                    Repository Input                      │
-├───────────────┬──────────────────────────┬───────────────┤
-│               │                          │               │
-│   Function    │       Call Graph         │    Impact     │
-│     Index     │                          │   Inspector   │
-│               │                          │               │
-│   Functions   │    Dependency Nodes      │   Risk        │
-│   Search      │    + Relationships       │   Tests       │
-│               │                          │   AI Review   │
-│               │                          │               │
-└───────────────┴──────────────────────────┴───────────────┘
-
-
-
-
-
-
-🔐 Environment Variables
-
-Create a .env file in the project root:
-
-Plain Text
-
-
-NEO4J_URI=your_neo4j_uri
+```
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+- **React 19** & **TypeScript**
+- **Vite** (Optimized chunking & code splitting)
+- **Tailwind CSS** (Modern dark-mode design system)
+- **Lucide Icons**
+- **Framer Motion** & **Wouter**
+
+### Backend & API
+- **Node.js** & **Express**
+- **tRPC** (End-to-end type safety)
+- **ts-morph** (Abstract Syntax Tree parsing & static analysis)
+- **TypeScript Compiler API**
+
+### Graph Database
+- **Neo4j AuraDB** (Cloud graph persistence)
+- **Cypher Query Language** (Deterministic transitive path traversals)
+
+### Artificial Intelligence
+- **Google Gemini** (`gemini-2.0-flash` / grounded contextual explanations)
+
+### Repository Integration
+- **GitHub REST API** (Tree recursive parser)
+- **Local Directory Upload** (Browser directory reader)
+
+---
+
+## 🎯 Product Workflow
+
+1. **Add a repository**: Paste a public GitHub URL, enter a repository slug, or upload a local folder.
+2. **Analyze the repository**: BlastRadius parses TypeScript/JavaScript ASTs and constructs the dependency graph.
+3. **Explore the graph**: Browse functions in the index or view the interactive architectural call graph.
+4. **Select a function**: Click any function to make it the mutation target.
+5. **Simulate a change**: Choose a change type (modify implementation, change parameters, rename, remove, etc.).
+6. **Inspect the blast radius**:
+   - Upstream direct callers & downstream callees
+   - Transitive blast radius paths
+   - Affected files, APIs, database operations, and tests
+7. **Understand the risk**: Review deterministic graph facts and Gemini's natural language risk assessment.
+
+---
+
+## 🖥️ Interface
+
+BlastRadius is structured into a 3-column developer workspace:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Repository Input / Top Bar                      │
+├─────────────────┬──────────────────────────────────┬───────────────────┤
+│                 │                                  │                   │
+│  Function Index │         Call Graph Canvas        │  Impact Inspector │
+│                 │                                  │                   │
+│ • Search filter │ • Upstream Callers (Affected)    │ • Change Simulator│
+│ • Function list │ • Selected Target Capsule        │ • Surface Metrics │
+│ • File & line   │ • Downstream Callees             │ • Connected Tests │
+│                 │ • Smooth Bézier Dependency Paths │ • Gemini AI Review│
+│                 │ • Interactive Hover HUD          │                   │
+│                 │                                  │                   │
+└─────────────────┴──────────────────────────────────┴───────────────────┘
+```
+
+---
+
+## 🔐 Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+# Neo4j AuraDB Configuration
+NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_neo4j_password
 
+# Google Gemini API Key
 GEMINI_API_KEY=your_gemini_api_key
 
+# Optional GitHub Token (increases GitHub API rate limits)
+GITHUB_TOKEN=your_github_personal_access_token
+```
 
+> **Security Note:** Never commit `.env` or credentials to git. Verify that your `.gitignore` contains:
+> ```text
+> .env
+> .env.local
+> node_modules
+> dist
+> ```
 
-Never commit .env or API credentials to GitHub.
+---
 
-Make sure .gitignore contains:
+## ⚙️ Installation
 
-Plain Text
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Ayushsharma1908/Block--Radius.git
+   cd Block--Radius
+   ```
 
+2. **Install dependencies:**
+   ```bash
+   pnpm install
+   ```
 
-.env
-.env.local
-node_modules
-dist
+3. **Configure environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+   *Populate your Neo4j and Gemini credentials in `.env`.*
 
+---
 
+## ▶️ Development
 
+Start the local server with hot reloading:
 
+```powershell
+# Windows PowerShell
+$env:NODE_ENV="development"; pnpm exec tsx watch server/_core/index.ts
 
+# Linux / macOS
+NODE_ENV=development pnpm exec tsx watch server/_core/index.ts
+```
 
-⚙️ Installation
+The application will be accessible at:
+👉 **[http://localhost:3000](http://localhost:3000/)** (or next available port, e.g. `http://localhost:3001`)
 
-Clone the repository:
+---
 
-Bash
+## 🧪 Testing & Verification
 
-
-git clone https://github.com/Ayushsharma1908/Block--Radius.git
-
-
-
-Move into the project:
-
-Bash
-
-
-cd Block--Radius
-
-
-
-Install dependencies:
-
-Bash
-
-
-pnpm install
-
-
-
-Create your environment file:
-
-Bash
-
-
-.env
-
-
-
-Add the required Neo4j and Gemini credentials.
-
-
-
-
-▶️ Development
-
-Start the development server:
-
-Windows PowerShell
-
-Plain Text
-
-
-$env:NODE_ENV="development"
-pnpm exec tsx watch server/_core/index.ts
-
-
-
-The application will be available at:
-
-Plain Text
-
-
-http://localhost:3000
-
-
-
-
-
-
-🧪 Testing
-
-Run the test suite:
-
-Bash
-
-
+Run the automated test suite:
+```bash
 pnpm test
+```
 
-
-
-Run TypeScript checks:
-
-Bash
-
-
+Run TypeScript typecheck:
+```bash
 pnpm check
+```
 
+---
 
+## 🏗️ Production Build
 
-
-
-
-🏗️ Production Build
-
-Build the application:
-
-Bash
-
-
+Compile client and server bundles:
+```bash
 pnpm build
+```
 
-
-
-Start the production server:
-
-Bash
-
-
+Run production server:
+```bash
 pnpm start
+```
 
+---
 
+## 📈 Current Capabilities
 
+- [x] Static AST parsing of TypeScript & JavaScript repositories
+- [x] Dependency graph construction & Neo4j persistence
+- [x] Built-in demo graph fallback (no credentials required to explore)
+- [x] Interactive SVG node capsule visualization with semantic kind tags
+- [x] Architectural swimlanes (`Upstream Callers` → `Target` → `Downstream Callees`)
+- [x] Smooth cubic Bézier connectors with animated flow streams
+- [x] 5 distinct mutation simulation types
+- [x] Multi-tier transitive blast radius calculation
+- [x] Impact path tracing (`A → B → C → Target`)
+- [x] Graph-derived risk factor metrics (fan-in, fan-out, depth, API surface)
+- [x] Test relationship detection & rerun recommendations
+- [x] Grounded Gemini AI change risk summaries
+- [x] Code-split bundles & sub-millisecond in-memory simulation caching
 
+---
 
+## 🗺️ Roadmap
 
-📈 Current Capabilities
+### Current
+- Repository dependency graph
+- Interactive function graph
+- Change simulation
+- Direct impact analysis
+- Transitive impact analysis
+- Impact path analysis
+- Risk factor analysis
+- Test impact analysis
+- Gemini-assisted review
 
-BlastRadius currently focuses on:
+### Next
+- Pull Request analysis & CI/CD GitHub Action integration
+- Deeper GitHub integration with branch diff comparison
+- Dependency hotspots & coupling detection
+- Architectural code smell warnings
+- Before / after architecture visual simulation
+- Enhanced test coverage mapping
+- Broader language support (Python, Go, Java)
 
-•
-Repository analysis
+---
 
-•
-Dependency graph generation
+## 🔬 Design Principle
 
-•
-Neo4j graph persistence
+BlastRadius follows a strict principle:
 
-•
-Interactive graph visualization
+> **Deterministic graph computation first. AI explanation second.**
 
-•
-Function exploration
+The system never relies on an AI model to guess or hallucinate dependency relationships:
 
-•
-Direct dependency analysis
+```text
+Source Code → Static Analysis → Dependency Graph → Graph Traversal → Verified Facts → AI Explanation
+```
 
-•
-Transitive dependency analysis
+This ensures that every explanation is 100% grounded in verified mathematical call graph data.
 
-•
-Change simulation
+---
 
-•
-Impact paths
+## ⚠️ Limitations
 
-•
-Risk factor analysis
+- BlastRadius currently focuses on JavaScript and TypeScript codebases.
+- Impact analysis is based on relationships that can be statically extracted from source code.
+- Dynamic behavior, runtime-evaluated dependencies, reflection, or external distributed microservices may not be fully captured.
+- BlastRadius should be treated as an intelligent developer-assistance and analysis tool rather than a guarantee that every possible regression will be caught.
 
-•
-Test impact analysis
+---
 
-•
-Gemini-assisted explanations
+## 🌟 Vision
 
-•
-Multiple repository analysis
+Software systems become harder to reason about as they scale. BlastRadius aims to make dependency relationships visible and change impact understandable before developers ship code.
 
+The long-term vision is a development workflow where engineers can simply ask:
+> **"What happens if I change this?"**
 
+...and immediately explore the affected surface of their system with confidence.
 
+---
 
-🗺️ Roadmap
+## 👨‍💻 Built With
 
-Current
+- **React** · **TypeScript** · **Vite** · **Tailwind CSS**
+- **ts-morph** · **Neo4j AuraDB** · **Cypher** · **Google Gemini**
 
+---
 
-
-
-Repository dependency graph
-
-
-
-
-Interactive function graph
-
-
-
-
-Change simulation
-
-
-
-
-Direct impact analysis
-
-
-
-
-Transitive impact analysis
-
-
-
-
-Impact path analysis
-
-
-
-
-Risk factor analysis
-
-
-
-
-Test impact analysis
-
-
-
-
-Gemini-assisted review
-
-Next
-
-
-
-
-Pull Request analysis
-
-
-
-
-Deeper GitHub integration
-
-
-
-
-Dependency hotspots
-
-
-
-
-Architecture smell detection
-
-
-
-
-Before/after architecture simulation
-
-
-
-
-Improved test mapping
-
-
-
-
-Broader language support
-
-
-
-
-🔬 Design Principle
-
-BlastRadius follows a simple principle:
-
-
-Deterministic graph computation first. AI explanation second.
-
-The system does not rely on an AI model to invent dependency relationships.
-
-Instead:
-
-Plain Text
-
-
-Source Code
-    ↓
-Static Analysis
-    ↓
-Dependency Graph
-    ↓
-Graph Traversal
-    ↓
-Impact Facts
-    ↓
-AI Explanation
-
-
-
-This makes the explanation grounded in the actual repository analysis.
-
-
-
-
-⚠️ Limitations
-
-BlastRadius is currently focused primarily on JavaScript/TypeScript repositories.
-
-The accuracy of impact analysis depends on the relationships that can be statically extracted from the analyzed repository.
-
-Dynamic behavior, runtime-generated dependencies, reflection, external systems, and relationships that cannot be inferred statically may not be fully represented.
-
-BlastRadius should therefore be treated as a developer-assistance and analysis tool rather than a guarantee that every possible regression will be detected.
-
-
-
-
-🌟 Vision
-
-Software systems become harder to reason about as they grow.
-
-BlastRadius aims to make dependency relationships visible and change impact understandable before developers ship changes.
-
-The long-term vision is a development workflow where engineers can ask:
-
-Plain Text
-
-
-"What happens if I change this?"
-
-
-
-and immediately explore the affected part of their system.
-
-
-
-
-👨‍💻 Built With
-
-Built as a developer tooling project combining:
-
-React · TypeScript · ts-morph · Neo4j · Cypher · Gemini · React Flow
-
-
-
-
-📄 License
+## 📄 License
 
 This project is currently provided for demonstration and development purposes.
-
-Add an appropriate open-source license before presenting this repository as an officially licensed open-source project.
-
+Add an appropriate open-source license (e.g. MIT) before presenting this repository as an officially licensed open-source project.
